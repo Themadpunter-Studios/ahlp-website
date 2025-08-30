@@ -8,14 +8,11 @@
   <body class="bg-gray-950 text-white min-h-screen flex flex-col">
     <div class="container mx-auto p-4">
       <h1 class="text-3xl font-bold mb-4">Appel Hardest Level Progression</h1>
-      <p>
-        The Appel Hardest Level Progression is a website intended to show you good levels to play for your current skill level to help you progress and gain skills.
-        It includes a tracker that helps you track which levels you've completed, different tiers and skill levels, and more.
-      </p>
+      <p> The Appel Hardest Level Progression is a website intended to show you good levels to play for your current skill level to help you progress and gain skills. It includes a tracker that helps you track which levels you've completed, different tiers and skill levels, and more. </p>
       <br>
       <!-- Tabs -->
       <div id="tabs" class="flex space-x-2 mb-2"></div>
-      <!-- Current Badge -->
+      <!-- Current Badge / Progress -->
       <div id="badge-display" class="mb-4"></div>
       <!-- Table -->
       <div id="table-container" class="min-h-[400px]">
@@ -52,11 +49,14 @@
       // === CONFIG ===
       const SHEET_ID = "16ABG_twIFkV59ysUpBR0gChxomBg0iU30N8VXWKgXJs";
       const GID = "0";
+      const SHEET_2_GID = "743454442"; // gid for sheet 2 (pack info)
       const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${GID}`;
       let levels = [];
       let ranks = [];
+      let packs = [];
+      let packsInfo = [];
       let currentRank = null;
-      // Order + colors
+      let currentPack = null;
       const RANK_ORDER = ["Beginner", "Bronze", "Silver", "Gold", "Platinum", "Emerald", "Diamond", "Onyx", "Amethyst"];
       const RANK_COLORS = {
         Beginner: "bg-blue-500 text-black",
@@ -69,12 +69,13 @@
         Onyx: "bg-gray-700",
         Amethyst: "bg-purple-500"
       };
-      async function fetchSheet() {
-        const res = await fetch(SHEET_URL);
-        const text = await res.text();
-        const json = JSON.parse(text.substr(47).slice(0, -2));
-        const rows = json.table.rows;
-        levels = rows.map(r => {
+      async function fetchSheets() {
+        // Sheet 1 (levels)
+        const res1 = await fetch(SHEET_URL);
+        const text1 = await res1.text();
+        const json1 = JSON.parse(text1.substr(47).slice(0, -2));
+        const rows1 = json1.table.rows;
+        levels = rows1.map(r => {
           const c = r.c.map(x => x ? x.v : "");
           return {
             id: c[0],
@@ -83,10 +84,23 @@
             skill1: c[3],
             skill2: c[4],
             rank: c[5],
-            code: c[6]
+            code: c[6],
+            packs: c[7] ? c[7].split(",").map(p => p.trim()) : []
           };
         });
+        // Sheet 2 (pack info)
+        const res2 = await fetch(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${SHEET_2_GID}`);
+        const text2 = await res2.text();
+        const json2 = JSON.parse(text2.substr(47).slice(0, -2));
+        const rows2 = json2.table.rows;
+        console.log(json2)
+        packsInfo = rows2.map(r => ({
+          name: r.c[0]?.v ?? "",
+          creator: r.c[1]?.v ?? "",
+          description: r.c[2]?.v ?? ""
+        }));
         ranks = RANK_ORDER.filter(rank => levels.some(l => l.rank === rank));
+        packs = [...new Set(levels.flatMap(l => l.packs))].filter(p => p);
         currentRank = ranks[0];
         renderTabs();
         renderTable(currentRank);
@@ -95,88 +109,185 @@
       function renderTabs() {
         const tabDiv = document.getElementById("tabs");
         tabDiv.innerHTML = "";
-        ranks.forEach(rank => {
+        [...ranks, "Level Packs"].forEach(rank => {
           const btn = document.createElement("button");
           btn.textContent = rank;
-          // Always use the rank color
-          btn.className = "px-4 py-2 rounded-lg transition-colors " + (RANK_COLORS[rank] || "bg-gray-600");
-          // Add a darker hover variant for feedback
-          btn.className += " hover:opacity-80";
+          btn.className = "px-4 py-2 rounded-lg transition-colors " + (RANK_COLORS[rank] || "bg-gray-600") + " hover:opacity-80";
           btn.onclick = () => {
             currentRank = rank;
+            currentPack = null;
             renderTabs();
-            renderTable(rank);
+            if (rank === "Level Packs") {
+              renderPackList();
+            } else {
+              renderTable(rank);
+            }
           };
           tabDiv.appendChild(btn);
         });
       }
 
-      function renderTable(rank) {
+      function renderPackList() {
+        const tableHead = document.querySelector("thead");
+        tableHead.innerHTML = `
+    
+											<tr class="bg-gray-800">
+												<th class="p-2 text-left">Pack Name</th>
+												<th class="p-2 text-left">Creator</th>
+												<th class="p-2 text-left">Description</th>
+												<th class="p-2 text-left">Progress</th>
+											</tr>
+  `;
+        const table = document.querySelector("table");
+        table.querySelector("colgroup").innerHTML = `
+    
+											<col class="w-1/4">
+												<col class="w-1/6">
+													<col class="w-3/6">
+														<col class="w-1/6">
+  `;
         const tbody = document.getElementById("table-body");
-        const filtered = levels.filter(l => l.rank === rank);
+        tbody.innerHTML = packs.map(pName => {
+          const packMeta = packsInfo.find(pi => pi.name === pName) || {};
+          const totalLevels = levels.filter(l => l.packs.includes(pName)).length;
+          const completedLevels = levels.filter(l => l.packs.includes(pName) && localStorage.getItem("ahlp_" + l.id) === "true").length;
+          return `
+    
+															<tr class="border-b border-gray-700 hover:bg-gray-800 cursor-pointer" onclick="renderPack('${pName}')">
+																<td class="p-2 font-bold">${pName}</td>
+																<td class="p-2 truncate">${packMeta.creator || "—"}</td>
+																<td class="p-2 truncate">${packMeta.description || "—"}</td>
+																<td class="p-2 text-center">${completedLevels} / ${totalLevels}</td>
+															</tr>
+  `;
+        }).join("");
+        // clear badge/progress
+        document.getElementById("badge-display").innerHTML = "";
+      }
+      // When we render an individual pack, restore the normal table header
+      function renderPack(pack) {
+        currentPack = pack;
+        const tableHead = document.querySelector("thead");
+        tableHead.innerHTML = `
+        
+															<tr class="bg-gray-800">
+																<th class="p-2 text-left">✔</th>
+																<th class="p-2 text-left">Level Name</th>
+																<th class="p-2 text-left">Creator</th>
+																<th class="p-2 text-left">Skill 1</th>
+																<th class="p-2 text-left">Skill 2</th>
+																<th class="p-2 text-left">Level Code</th>
+															</tr>
+      `;
+        // restore original widths
+        const table = document.querySelector("table");
+        table.querySelector("colgroup").innerHTML = `
+        
+															<col class="w-1/12">
+																<!-- checkbox -->
+																<col class="w-1/4">
+																	<!-- 25% -->
+																	<col class="w-1/5">
+																		<!-- 20% -->
+																		<col class="w-1/5">
+																			<!-- 20% -->
+																			<col class="w-1/5">
+																				<!-- 20% -->
+																				<col class="w-1/10">
+																					<!-- 10% -->
+      `;
+        const tbody = document.getElementById("table-body");
+        const filtered = levels.filter(l => l.packs.includes(pack));
         tbody.innerHTML = filtered.map(l => {
           const checked = localStorage.getItem("ahlp_" + l.id) === "true";
           return `
           
-										<tr class="border-b border-gray-700 hover:bg-gray-800">
-											<td class="p-2">
-												<input type="checkbox" ${checked ? "checked" : ""} 
-                     onchange="toggleLevel('${l.id}', this.checked)">
-												</td>
-												<td class="p-2 truncate">${l.name}</td>
-												<td class="p-2 truncate">${l.creator}</td>
-												<td class="p-2 truncate">${l.skill1}</td>
-												<td class="p-2 truncate">${l.skill2}</td>
-												<td class="p-2">
-													<button onclick="copyCode('${l.code}')" 
-                      class="bg-blue-600 hover:bg-blue-500 px-2 py-1 rounded">
-                Copy
-              </button>
-												</td>
-											</tr>
+																					<tr class="border-b border-gray-700 hover:bg-gray-800">
+																						<td class="p-2">
+																							<input type="checkbox" ${checked ? "checked" : ""} onchange="toggleLevel('${l.id}', this.checked)">
+																							</td>
+																							<td class="p-2 truncate">${l.name}</td>
+																							<td class="p-2 truncate">${l.creator}</td>
+																							<td class="p-2 truncate">${l.skill1}</td>
+																							<td class="p-2 truncate">${l.skill2}</td>
+																							<td class="p-2">
+																								<button onclick="copyCode('${l.code}')" class="bg-blue-600 hover:bg-blue-500 px-2 py-1 rounded">Copy</button>
+																							</td>
+																						</tr>
         `;
         }).join("");
-        updateBadgeDisplay(rank);
+        updateBadgeDisplay(pack, true);
       }
-
+      // === TABLE RENDER ===
+      function renderTable(rank, pack) {
+        const tbody = document.getElementById("table-body");
+        let filtered = [];
+        if (rank) {
+          filtered = levels.filter(l => l.rank === rank);
+        } else if (pack) {
+          filtered = levels.filter(l => l.packs.includes(pack));
+        }
+        tbody.innerHTML = filtered.map(l => {
+          const checked = localStorage.getItem("ahlp_" + l.id) === "true";
+          return `
+          
+																						<tr class="border-b border-gray-700 hover:bg-gray-800">
+																							<td class="p-2">
+																								<input type="checkbox" ${checked ? "checked" : ""} onchange="toggleLevel('${l.id}', this.checked)">
+																								</td>
+																								<td class="p-2 truncate">${l.name}</td>
+																								<td class="p-2 truncate">${l.creator}</td>
+																								<td class="p-2 truncate">${l.skill1}</td>
+																								<td class="p-2 truncate">${l.skill2}</td>
+																								<td class="p-2">
+																									<button onclick="copyCode('${l.code}')" class="bg-blue-600 hover:bg-blue-500 px-2 py-1 rounded">Copy</button>
+																								</td>
+																							</tr>
+        `;
+        }).join("");
+        updateBadgeDisplay(rank, pack);
+      }
+      // === COMPLETION STORAGE ===
       function toggleLevel(id, checked) {
         localStorage.setItem("ahlp_" + id, checked);
-        renderTabs();
-        updateBadgeDisplay(currentRank);
+        if (currentRank === "Level Packs" && currentPack) {
+          // We are inside a specific pack
+          updateBadgeDisplay(currentPack, true);
+        } else {
+          // Normal rank view
+          updateBadgeDisplay(currentRank);
+        }
       }
 
       function copyCode(code) {
         navigator.clipboard.writeText(code);
         alert("Copied: " + code);
       }
-
-      function updateBadgeDisplay(rank) {
+      // === BADGE / PROGRESS ===
+      function updateBadgeDisplay(key, isPack = false) {
         const badgeDiv = document.getElementById("badge-display");
-        const rankLevels = levels.filter(l => l.rank === rank);
-        const completed = rankLevels.filter(l => localStorage.getItem("ahlp_" + l.id) === "true").length;
-        const half = Math.ceil(rankLevels.length / 2);
+        let relevantLevels = isPack ? levels.filter(l => l.packs.includes(key)) : levels.filter(l => l.rank === key);
+        const completed = relevantLevels.filter(l => localStorage.getItem("ahlp_" + l.id) === "true").length;
+        const half = Math.ceil(relevantLevels.length / 2);
         badgeDiv.innerHTML = "";
-        // Half badge
-        if (completed >= half && rankLevels.length > 0) {
+        if (completed >= half && relevantLevels.length > 0) {
           const halfBadge = document.createElement("div");
-          halfBadge.textContent = rank + " Badge 🏅";
-          halfBadge.className = "inline-block px-3 py-1 rounded-lg mr-2 " + (RANK_COLORS[rank] || "bg-green-600");
+          halfBadge.textContent = key + " Badge 🏅";
+          halfBadge.className = "inline-block px-3 py-1 rounded-lg mr-2 " + (RANK_COLORS[key] || "bg-green-600");
           badgeDiv.appendChild(halfBadge);
         }
-        // Full badge
-        if (completed === rankLevels.length && rankLevels.length > 0) {
+        if (completed === relevantLevels.length && relevantLevels.length > 0) {
           const fullBadge = document.createElement("div");
-          fullBadge.textContent = rank + " Mastery Badge 🏆";
-          fullBadge.className = "inline-block px-3 py-1 rounded-lg " + (RANK_COLORS[rank] || "bg-green-600");
+          fullBadge.textContent = key + " Mastery Badge 🏆";
+          fullBadge.className = "inline-block px-3 py-1 rounded-lg " + (RANK_COLORS[key] || "bg-green-600");
           badgeDiv.appendChild(fullBadge);
         }
-        // Always show progress underneath
         const progress = document.createElement("div");
-        progress.textContent = `${completed} / ${rankLevels.length} levels completed`;
+        progress.textContent = `${completed} / ${relevantLevels.length} levels completed`;
         progress.className = "mt-2 text-gray-300";
         badgeDiv.appendChild(progress);
       }
-      fetchSheet();
+      fetchSheets();
     </script>
   </body>
 </html>
